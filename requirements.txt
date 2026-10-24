@@ -1,0 +1,11 @@
+Pillow>=10.0
+pillow-heif>=0.16
+numpy>=2.0
+opencv-python-headless>=4.9
+torch>=2.2
+torchvision
+open_clip_torch>=2.24
+mediapipe>=0.10
+pyiqa>=0.1.13
+scikit-learn>=1.4
+pywebview>=5

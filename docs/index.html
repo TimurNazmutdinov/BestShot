@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BestShots — лучшие кадры из семейного архива</title>
+<meta name="description" content="BestShots — локальная программа для Windows: выбирает лучшие кадры в тысячах фото, находит дубликаты и учится на вашем выборе. Всё офлайн, фото никуда не отправляются.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2318263f'/%3E%3Cpath d='M32 14l5.6 11.4 12.6 1.8-9.1 8.9 2.1 12.5L32 42.6 20.8 48.6l2.1-12.5-9.1-8.9 12.6-1.8z' fill='%23ffc83c'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--text:#1b2230;--muted:#5d6678;--line:#dfe3ea;--accent:#2563eb;--accent-text:#fff;--soft:#eaf0ff;--code:#101827;--code-text:#e8edf7}
+@media (prefers-color-scheme:dark){:root{--bg:#10141c;--panel:#171c27;--text:#e8ecf4;--muted:#9aa4b8;--line:#2a3142;--accent:#6ea0ff;--accent-text:#0d1320;--soft:#1c2740;--code:#0b0f17;--code-text:#e8edf7}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+header.top{border-bottom:1px solid var(--line);background:var(--panel)}
+header.top .wrap{display:flex;align-items:center;gap:16px;padding:12px 16px;flex-wrap:wrap}
+header.top b{font-size:18px}
+header.top nav{margin-left:auto;display:flex;gap:16px;flex-wrap:wrap;font-size:14px}
+header.top nav a{color:var(--muted);text-decoration:none}
+header.top nav a:hover{color:var(--accent)}
+.hero{padding:56px 0 40px;text-align:center}
+.hero h1{font-size:clamp(30px,6vw,52px);line-height:1.1;margin:0 0 14px}
+.hero p.lead{max-width:720px;margin:0 auto 24px;font-size:clamp(16px,2.4vw,20px);color:var(--muted)}
+.btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 22px;border-radius:10px;border:1px solid var(--accent);text-decoration:none;font-weight:600}
+.btn.primary{background:var(--accent);color:var(--accent-text)}
+.btn.ghost{color:var(--accent)}
+.shot{margin:34px auto 0;max-width:1000px}
+.shot img,.gallery img{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 36px rgba(0,0,0,.18);background:var(--panel)}
+section{padding:42px 0}
+section h2{font-size:clamp(24px,4vw,32px);margin:0 0 6px}
+section .sub{color:var(--muted);margin:0 0 24px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.card h3{margin:0 0 6px;font-size:18px}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.card .ico{font-size:26px;display:block;margin-bottom:6px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
+.gallery figure{margin:0}
+.gallery figcaption{margin-top:8px;color:var(--muted);font-size:14px}
+.steps{counter-reset:s;display:grid;gap:12px;padding:0;list-style:none}
+.steps li{counter-increment:s;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px 14px 56px;position:relative}
+.steps li::before{content:counter(s);position:absolute;left:14px;top:12px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-text);font-weight:700;display:flex;align-items:center;justify-content:center}
+pre{background:var(--code);color:var(--code-text);padding:14px 16px;border-radius:10px;overflow:auto;font:14px/1.5 Consolas,"Cascadia Mono",monospace;margin:10px 0 0}
+code{font-family:Consolas,"Cascadia Mono",monospace;font-size:.92em;background:var(--soft);padding:1px 6px;border-radius:5px}
+pre code{background:none;padding:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:14px}
+.chip small{color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:15px}
+td,th{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.note{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--muted);font-size:15px}
+footer{border-top:1px solid var(--line);background:var(--panel);padding:26px 0;color:var(--muted);font-size:14px;text-align:center}
+@media (max-width:600px){.hero{padding:34px 0 24px}section{padding:30px 0}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <b>★ BestShots</b>
+  <nav><a href="#features">Возможности</a><a href="#screens">Скриншоты</a><a href="#stack">Технологии</a><a href="#install">Установка</a><a href="https://github.com/timurnazmutdinov/BestShot">GitHub</a></nav>
+</div></header>
+
+<main>
+<div class="wrap hero">
+  <h1>Лучшие кадры из семейного архива —<br>без облака и без рутины</h1>
+  <p class="lead">BestShots выбирает лучшие фото в тысячах снимков, убирает дубликаты и учится на вашем выборе. Всё работает на вашем компьютере: фотографии никуда не отправляются.</p>
+  <div class="btns"><a class="btn primary" href="https://github.com/timurnazmutdinov/BestShot">Открыть на GitHub</a><a class="btn ghost" href="#install">Установка в 3 шага</a></div>
+  <div class="shot"><img src="img/select.png" alt="Окно BestShots: вкладка «Отбор», события слева, кадры справа" width="1440" height="900"></div>
+</div>
+
+<section id="features"><div class="wrap">
+  <h2>Что умеет</h2>
+  <p class="sub">От сырого архива на десятки тысяч снимков — до аккуратной подборки лучшего.</p>
+  <div class="cards">
+    <div class="card"><span class="ico">★</span><h3>Отбор лучших кадров</h3><p>Фото группируются в события по дате съёмки. В каждом событии система предлагает лучшие кадры; смаз, тёмные и пересвеченные не предлагаются. Решает всегда человек: клик — отобрать или снять.</p></div>
+    <div class="card"><span class="ico">🙂</span><h3>Эмоции и эстетика</h3><p>Эстетика (CLIP + LAION, TOPIQ), техническое качество, лица, улыбка и моргание. Улыбка — только бонус: спокойные портреты не страдают.</p></div>
+    <div class="card"><span class="ico">🧠</span><h3>Обучение на вашем выборе</h3><p>Личная модель учится на событиях, которые вы отметили «Проверено», и включается, только если угадывает лучше базовой оценки.</p></div>
+    <div class="card"><span class="ico">🗂</span><h3>Дубликаты</h3><p>Точные копии и «та же фотография» (пересохранённые, уменьшенные, повёрнутые, из мессенджеров). Дубли уходят в карантин с журналом и кнопкой «Вернуть» — оригиналы не удаляются никогда.</p></div>
+    <div class="card"><span class="ico">⚡</span><h3>Большие архивы</h3><p>Анализ порциями «подряд до конца», события листаются страницами, всё считается на CPU и продолжается с места остановки.</p></div>
+    <div class="card"><span class="ico">🔒</span><h3>Офлайн и приватность</h3><p>Сеть нужна один раз — скачать модели. Сервер слушает только 127.0.0.1, исходные фото только читаются, телеметрии нет.</p></div>
+  </div>
+</div></section>
+
+<section id="screens"><div class="wrap">
+  <h2>Как это выглядит</h2>
+  <p class="sub">Скриншоты сделаны на сгенерированных пейзажах — без реальных людей и личных фото.</p>
+  <div class="gallery">
+    <figure><img src="img/dupes.png" alt="Вкладка «Дубли»: группы точных копий и визуальных дублей" loading="lazy" width="1440" height="900"><figcaption>Вкладка «Дубли»: группы, оригинал помечен ★, перемещение в карантин и возврат по журналу.</figcaption></figure>
+    <figure><img src="img/settings.png" alt="Окно «О программе и стек технологий»" loading="lazy" width="1440" height="900"><figcaption>Окно «О программе»: версии библиотек, модели на диске, сведения для отчёта об ошибке.</figcaption></figure>
+  </div>
+</div></section>
+
+<section id="how"><div class="wrap">
+  <h2>Как это работает</h2>
+  <ol class="steps">
+    <li><b>Выберите главную папку</b> с фото (подпапки любой вложенности). Цвет папки показывает, что уже обработано.</li>
+    <li><b>Найдите дубли</b> (по желанию) и перенесите их в карантин одной кнопкой.</li>
+    <li><b>Запустите анализ.</b> Для больших архивов — порциями по 500–5000 фото; результат виден после каждой порции.</li>
+    <li><b>Просмотрите события</b> и нажимайте «Проверено и дальше». Система уже отметила лучшее — вы только поправляете.</li>
+    <li><b>Экспортируйте</b> отобранное из проверенных событий в папку по годам. Программа учится на вашем выборе.</li>
+  </ol>
+</div></section>
+
+<section id="stack"><div class="wrap">
+  <h2>Технологии</h2>
+  <p class="sub">Всё локально, на CPU; видеокарта не нужна.</p>
+  <div class="chips">
+    <span class="chip">Python <small>3.11+</small></span><span class="chip">SQLite</span><span class="chip">PyTorch</span>
+    <span class="chip">open_clip <small>CLIP ViT-L/14</small></span><span class="chip">LAION Aesthetic Predictor v2</span>
+    <span class="chip">pyiqa <small>TOPIQ-IAA / TOPIQ-NR</small></span><span class="chip">OpenCV <small>YuNet</small></span>
+    <span class="chip">MediaPipe <small>Face Landmarker</small></span><span class="chip">scikit-learn</span><span class="chip">NumPy</span>
+    <span class="chip">Pillow · pillow-heif</span><span class="chip">pHash / dHash · SHA-256</span>
+    <span class="chip">http.server · HTML/CSS/JS без фреймворков</span><span class="chip">pywebview <small>Edge WebView2</small></span><span class="chip">PyInstaller</span>
+  </div>
+</div></section>
+
+<section id="req"><div class="wrap">
+  <h2>Системные требования</h2>
+  <table>
+    <tr><th>Система</th><td>Windows 10/11 (для окна нужен Edge WebView2 — есть в Windows 11)</td></tr>
+    <tr><th>Python</th><td>3.11–3.13</td></tr>
+    <tr><th>Место на диске</th><td>около 5 ГБ: окружение ≈ 2 ГБ, модели ≈ 3 ГБ (скачиваются при первом запуске)</td></tr>
+    <tr><th>Память и процессор</th><td>8 ГБ ОЗУ и больше; GPU не нужен. Анализ — десятки кадров в минуту на обычном ноутбуке</td></tr>
+  </table>
+</div></section>
+
+<section id="install"><div class="wrap">
+  <h2>Установка в 3 шага</h2>
+  <ol class="steps">
+    <li><b>Установите Python 3.11+</b> с <a href="https://www.python.org/downloads/">python.org</a> (отметьте «Add python.exe to PATH»).</li>
+    <li><b>Скачайте проект</b>
+      <pre><code>git clone https://github.com/timurnazmutdinov/BestShot.git
+cd BestShot</code></pre></li>
+    <li><b>Запустите <code>install.bat</code></b> — он создаст <code>.venv</code>, поставит зависимости и соберёт <code>BestShots.exe</code>. Затем откройте <code>BestShots.exe</code>, выберите папку с фото и нажмите «Анализировать новое».</li>
+  </ol>
+  <p class="sub" style="margin-top:14px">Без exe: <code>.\.venv\Scripts\python review.py</code>. Шаги установки можно посмотреть заранее: <code>install.bat -DryRun</code>.</p>
+</div></section>
+
+<section id="license"><div class="wrap">
+  <h2>Лицензии</h2>
+  <div class="note">Исходный код BestShots — MIT. Нейросетевые модели в репозиторий не входят, а скачиваются при первом запуске; у них свои лицензии. Часть весов (в первую очередь pyiqa/TOPIQ, лицензия PolyForm Noncommercial) допускает только некоммерческое использование — для разбора личного архива это не мешает. Подробности — в разделе «Лицензии моделей» <a href="https://github.com/timurnazmutdinov/BestShot#лицензии-моделей">README</a>.</div>
+</div></section>
+</main>
+
+<footer><div class="wrap">BestShots · MIT · <a href="https://github.com/timurnazmutdinov/BestShot">github.com/timurnazmutdinov/BestShot</a></div></footer>
+</body>
+</html>

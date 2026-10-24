@@ -1,0 +1,41 @@
+# окружение и артефакты сборки
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+BestShots.exe
+
+# данные пользователя: фото, базы, превью, журналы, экспорт — в репозиторий не попадают
+Photo-samples/
+Export/
+Export*/
+backups/
+_Дубли/
+thumbs/
+logs/
+webview-data/
+settings.json
+*.db
+*.db-*
+*.sqlite*
+
+# модели (скачиваются при первом запуске) и обученные веса
+models/
+*.pkl
+*.pth
+*.onnx
+*.task
+
+# изображения вне docs/ (фото семьи не должны попасть в репозиторий)
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.nef
+*.cr2
+*.arw
+*.dng
+!docs/img/*.png
+!icon.ico

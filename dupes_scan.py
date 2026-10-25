@@ -259,7 +259,7 @@ def main():
         dirnames[:] = sorted(d for d in dirnames if not dupes.skip_dir(os.path.join(dirpath, d), d, excluded))
         for name in sorted(filenames):
             kind = dupes.kind_of(name)
-            if not kind:
+            if not kind or name.startswith("._"):  # служебные файлы macOS — не изображения
                 continue
             p = os.path.join(dirpath, name)
             try:

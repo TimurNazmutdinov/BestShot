@@ -1,7 +1,7 @@
 """BestShots: обучение личной модели отбора на выборе пользователя.
 
 Метки (таблица labels) — финальное состояние «отобрано / нет» кадров событий, которые пользователь экспортировал.
-Модель включается только если по leave-one-event-out угадывает лучше базовой оценки и предыдущей версии.
+Модель включается только если при проверке по событиям угадывает лучше базовой оценки и предыдущей версии.
 """
 import argparse
 import json
@@ -110,7 +110,7 @@ def summary_text(rep):
     if "message" in rep:
         return rep["message"]
     b, p = rep["base"], rep["personal"]
-    lines = [f"Меток: {rep['labels']} (событий: {rep['events']}), проверка — leave-one-event-out",
+    lines = [f"Меток: {rep['labels']} (событий: {rep['events']}), проверка по событиям",
              f"Базовая модель: {fmt(b)} ({100 * b['recommended'] / rep['total_frames']:.0f}% кадров)",
              f"Личная модель:  {fmt(p)} ({100 * p['recommended'] / rep['total_frames']:.0f}% кадров)"]
     if rep["enabled"]:

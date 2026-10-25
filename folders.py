@@ -222,11 +222,11 @@ def _walk_once(db_path):
                         for e in it:
                             try:
                                 if e.is_dir(follow_symlinks=False):
-                                    if is_hidden(e) or is_excluded(e.path, ex) or e.name == QUARANTINE:
+                                    if is_hidden(e) or is_excluded(e.path, ex) or e.name == QUARANTINE or e.name.lower() == "__macosx":
                                         continue
                                     has_dirs = 1
                                     stack.append(e.path)
-                                elif os.path.splitext(e.name)[1].lower() in PHOTO_EXT:
+                                elif os.path.splitext(e.name)[1].lower() in PHOTO_EXT and not e.name.startswith("._"):
                                     st = e.stat()
                                     total += 1
                                     k = known.get(e.path)

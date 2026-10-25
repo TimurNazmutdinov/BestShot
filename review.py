@@ -297,7 +297,7 @@ def copy_one(src, folder, index):
 
 
 def run_export(con, include_unreviewed=False):
-    report = {"copied": 0, "skipped": 0, "bytes": 0, "errors": [], "out": str(OUT_DIR)}
+    report = {"copied": 0, "skipped": 0, "missing": 0, "bytes": 0, "errors": [], "out": str(OUT_DIR)}
     indexes, events = {}, set()
     for r in export_rows(con, include_unreviewed):
         year = dest_dir(OUT_DIR, r)
@@ -307,6 +307,9 @@ def run_export(con, include_unreviewed=False):
             events.add(r["event_id"])
         try:
             res, nbytes = copy_one(Path(r["path"]), year, indexes[year])
+        except FileNotFoundError:  # файл удалён или перемещён с диска после сканирования — не ошибка экспорта
+            report["missing"] += 1
+            continue
         except OSError as e:
             report["errors"].append(f"{r['path']}: {e}")
             continue
@@ -348,7 +351,7 @@ def _train_worker():
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         p = subprocess.run([sys.executable, str(ROOT / "train.py"), "--db", str(DB_PATH), "--json"],
                            cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           creationflags=flags, timeout=1800)
+                           creationflags=flags, timeout=3600)
         lines = [l for l in p.stdout.splitlines() if not l.startswith("JSON:")]
         TRAIN["text"] = "\n".join(lines).strip() or (p.stderr.strip()[-500:] or "нет вывода")
         TRAIN["ok"] = p.returncode == 0
@@ -487,7 +490,7 @@ def _job_worker(steps, auto=False):
                     with JOB_LOCK:
                         JOB.update(stage="score", done=0, total=0, msg="Остановлено. Подготовка результатов по обработанным кадрам…")
                     JOB_RUN["stop"] = False
-                    run_step(["analyze.py", "--db", DB_PATH, "--score-only"])
+                    run_step(["analyze.py", "--db", DB_PATH, "--score-only", "--keep-decided"])
                 with JOB_LOCK:
                     JOB.update(state="stopped", error="")
                 log.info("остановлено пользователем")
@@ -593,15 +596,33 @@ def job_status():
     return d
 
 
-def choose_folder():
+def choose_folder(title="Папка с фото", initial=""):
     """Системный диалог выбора папки (tkinter в отдельном процессе — работает и в окне, и в браузере)."""
-    code = ("import tkinter as tk\nfrom tkinter import filedialog\nr = tk.Tk()\nr.withdraw()\n"
-            "r.attributes('-topmost', True)\nprint(filedialog.askdirectory(title='Папка с фото'))\n")
+    code = ("import sys\nimport tkinter as tk\nfrom tkinter import filedialog\nr = tk.Tk()\nr.withdraw()\n"
+            "r.attributes('-topmost', True)\n"
+            "print(filedialog.askdirectory(title=sys.argv[1], initialdir=sys.argv[2] or None))\n")
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    p = subprocess.run([child_python(), "-c", code], capture_output=True, text=True, encoding="utf-8",
+    p = subprocess.run([child_python(), "-c", code, title, initial], capture_output=True, text=True, encoding="utf-8",
                        errors="replace", env=env, creationflags=flags, timeout=600)
     return {"path": p.stdout.strip().replace("/", os.sep)}
+
+
+def set_export_dir(con, path):
+    """Папка экспорта запоминается в settings.json. Внутрь главной папки с фото экспортировать нельзя:
+    копии попали бы в следующее сканирование."""
+    global OUT_DIR
+    path = (path or "").strip().strip('"')
+    if not path:
+        raise ValueError("Папка не выбрана")
+    target = Path(path).resolve()
+    if target.exists() and not target.is_dir():
+        raise ValueError("Это не папка")
+    if any(under(folders.norm(str(target)), r) for r in folders.roots(con)):
+        raise ValueError("Папка экспорта не должна лежать внутри главной папки с фото")
+    OUT_DIR = target
+    save_settings(export_dir=str(target))
+    return str(target)
 
 
 # ---------------------------------------------------------------- API папок
@@ -707,6 +728,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def body(self):
         n = int(self.headers.get("Content-Length") or 0)
+        if n > 8 * 1024 * 1024:  # запросы интерфейса малы; огромное тело не читаем
+            raise ValueError("слишком большой запрос")
         return json.loads(self.rfile.read(n) or b"{}") if n else {}
 
     # --- GET
@@ -804,6 +827,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/folders/query":
                 return self.send_json(folders_query(data))
             if path == "/api/choose-folder":
+                if data.get("what") == "export":
+                    return self.send_json(choose_folder("Папка экспорта", str(OUT_DIR) if Path(OUT_DIR).is_dir() else ""))
                 return self.send_json(choose_folder())
             if path == "/api/shutdown":
                 self.send_json({"ok": True})
@@ -838,6 +863,8 @@ class Handler(BaseHTTPRequestHandler):
             with WRITE_LOCK:
                 con = db()
                 try:
+                    if path == "/api/export/set-dir":
+                        return self.send_json({"out": set_export_dir(con, data.get("path"))})
                     if path == "/api/decision":
                         set_decision(con, int(data["id"]), data.get("keep"))
                     elif (m := re.fullmatch(r"/api/event/(\d+)/reset", path)):
@@ -1229,8 +1256,8 @@ function applySummary(j) {
 function renderTotals() {
   const t = S.totals; if (!t) return;
   const pct = t.all_photos ? Math.round(100 * t.done_photos / t.all_photos) : 0;
-  $("#totals").innerHTML = `<span title="Сколько кадров отобрано (ваши решения и рекомендации системы)">Отобрано: <b>${nf(t.kept)}</b></span>` +
-    `<span title="Фото в событиях, отмеченных «проверено» или экспортированных, и в папках, отмеченных вручную">Отработано: <b>${nf(t.done_photos)}</b> из ${nf(t.all_photos)} фото (${pct}%)</span>`;
+  $("#totals").innerHTML = `<span title="Сколько кадров сейчас числится отобранными во всех событиях: ваши отметки, а там, где вы ничего не меняли, — рекомендация системы. Это число включает и события, которые вы ещё не проверили. В экспорт попадают только кадры из проверенных событий.">В отборе (с рекомендациями): <b>${nf(t.kept)}</b></span>` +
+    `<span title="Ход вашего просмотра, а не работы программы. В счёт идут фото из событий, которые вы отметили «Проверено» или уже экспортировали, и из папок, отмеченных вручную. Остальные фото ещё ждут вашей проверки. Сколько фото проанализировано программой, показано в панели «Папки» («осталось проанализировать»).">Проверено вами: <b>${nf(t.done_photos)}</b> из ${nf(t.all_photos)} фото (${pct}%)</span>`;
 }
 function renderEvents() {
   const box = $("#events");
@@ -1287,9 +1314,19 @@ function visibleList() {
   return out;
 }
 
+// «без людей» и брак (смаз, тёмный…) показываются отдельными плашками: у кадра могут быть обе причины
+function rejectBadges(p, cls) {
+  if (!p.reject) return "";
+  const rs = (p.reject_reason || "").split(",").filter(Boolean);
+  const defects = rs.filter((r) => r !== "без людей");
+  let out = "";
+  if (rs.includes("без людей")) out += `<span class="${cls}" title="Без людей: лиц в кадре нет, и модель CLIP не видит людей. Система не рекомендует этот кадр, но отобрать его можно вручную">без людей</span>`;
+  if (defects.length || !rs.length) out += `<span class="${cls}" title="Брак: система не рекомендует этот кадр, но отобрать его можно вручную">брак: ${esc(defects.join(", "))}</span>`;
+  return out;
+}
 function cardHTML(p) {
   const badges = (p.group_n > 1 && p.best ? '<span class="badge" title="Лучший кадр в группе похожих">★</span>' : "") +
-    (p.reject ? `<span class="badge bad" title="Брак: система не рекомендует этот кадр, но отобрать его можно вручную">брак: ${esc(p.reject_reason)}</span>` : "");
+    rejectBadges(p, "badge bad");
   return `<div class="card${p.keep ? " keep" : ""}" data-id="${p.id}" title="${esc(p.name)} — клик: отобрать/снять, двойной клик: просмотр">` +
     `<img loading="lazy" src="/thumb/${p.id}" alt=""><div class="badges">${badges}</div>` +
     `<div class="bar"><span title="Итоговый балл кадра">${num(p.score)}</span><span>${p.keep ? "✔ отобрано" : ""}</span></div></div>`;
@@ -1312,7 +1349,7 @@ function renderEvent() {
   }
   const f = (k, label, tip) => `<button data-f="${k}" class="${S.filter === k ? "on" : ""}" title="${tip}">${label}</button>`;
   let html = `<div class="toolbar"><b>Событие ${S.cur}</b>` + partNavHTML() +
-    f("all", "Все", "Показать все кадры события") + f("reject", "Только брак", "Показать только брак (смаз, тёмные, пересвет, низкое качество)") +
+    f("all", "Все", "Показать все кадры события") + f("reject", "Только брак", "Показать только брак (смаз, тёмные, пересвет, низкое качество) и кадры без людей") +
     f("keep", "Только отобранные", "Показать только отобранные кадры") +
     `<label title="Не показывать кадры, помеченные как брак"><input type="checkbox" id="hideRej" ${S.hideRej ? "checked" : ""}> скрыть брак</label><span class="sp"></span>` +
     `<button id="bestBtn" title="Сбросить ваши решения в этом событии к рекомендации системы">Взять рекомендованные</button>` +
@@ -1429,7 +1466,7 @@ function renderViewer() {
     `<span>${esc(p.name)} (${i + 1} из ${list.length})</span>` +
     `<span>эстетика ${num(p.aesthetic)}</span><span>эмоции ${num(p.emotion)}</span><span>балл ${num(p.score)}</span>` +
     `<span>лиц: ${p.n_faces ?? 0}</span><span>улыбка ${num(p.smile)}</span><span>моргание ${num(p.blink_frac)}</span><span>резкость ${num(p.sharp_center, 0)}</span>` +
-    (p.reject ? `<span class="bad">брак: ${esc(p.reject_reason)}</span>` : "") +
+    rejectBadges(p, "bad") +
     `<span>${esc(p.date_taken.replace("T", " "))}</span><span>${esc(p.camera_model || "камера неизвестна")}</span>` +
     `<span class="hint">← → · Пробел · Esc</span>`;
 }
@@ -1701,12 +1738,18 @@ function renderJob(j) {
   }
   box.innerHTML = html;
 }
+let lastQuiet = 0;
+async function refreshEventsQuiet() {  // список событий обновляется сам, пока идёт анализ (новые события появляются по мере обработки)
+  if (S.tab !== "select" || S.viewer) return;
+  try { const j = await api("GET", eventsUrl()); S.events = j.events; S.totals = j.totals; renderTotals(); renderEvents(); } catch (e) {}
+}
 async function pollJob() {
   clearInterval(jobTimer);
   const tick = async () => {
     try {
       const j = await api("GET", "/api/job");
       renderJob(j);
+      if (j.state === "running" && j.kind === "analyze" && Date.now() - lastQuiet > 30000) { lastQuiet = Date.now(); refreshEventsQuiet(); }
       if (j.state !== "running") {
         clearInterval(jobTimer);
         await loadTree();
@@ -1804,15 +1847,22 @@ function dialog(text, buttons) {
 $("#exportBtn").onclick = async () => {
   try {
     const p = await api("GET", "/api/export/preview");
+    const changeDir = ["Сменить папку…", async () => {
+      try {
+        const c = await api("POST", "/api/choose-folder", {what: "export"});
+        if (c.path) await api("POST", "/api/export/set-dir", {path: c.path});
+      } catch (e) { alert(e.message); }
+      $("#exportBtn").click();
+    }];
     const head = `Копирование (оригиналы не изменяются и не перемещаются) в:\n${p.out}\nФайлы раскладываются по годам: ГГГГ\\имя_файла. Уже скопированные пропускаются.\n\n`;
     const notReviewed = p.events_total - p.events_reviewed;
     const unrev = p.unreviewed_count ? `\n\nНе проверено событий: ${notReviewed}. Отобранных в них кадров: ${nf(p.unreviewed_count)} (${fmtMB(p.unreviewed_bytes)}) — они НЕ копируются. Чтобы они попали в экспорт, откройте события и нажмите «Проверено».` : "";
     const allBtn = ["Копировать и непроверенные…", () => dialog(`Копировать также рекомендации системы по непроверенным событиям (${nf(p.unreviewed_count)} кадров)? Это кадры, которые вы не просматривали.`, [["Отмена"], ["Да, копировать все", () => runExport(true), true]])];
     if (!p.count) {
-      dialog(head + `Проверенных событий нет (проверено ${p.events_reviewed} из ${p.events_total}), копировать пока нечего.` + unrev, p.unreviewed_count ? [["Закрыть"], allBtn] : [["Закрыть", null, true]]);
+      dialog(head + `Проверенных событий нет (проверено ${p.events_reviewed} из ${p.events_total}), копировать пока нечего.` + unrev, p.unreviewed_count ? [["Закрыть"], changeDir, allBtn] : [["Закрыть"], changeDir]);
     } else {
       dialog(head + `Проверено событий: ${p.events_reviewed} из ${p.events_total}.\nВ экспорт попадут отобранные кадры только из проверенных событий: ${nf(p.count)} файлов, ${fmtMB(p.bytes)}.` + unrev,
-        p.unreviewed_count ? [["Отмена"], allBtn, ["Копировать проверенные", () => runExport(false), true]] : [["Отмена"], ["Копировать", () => runExport(false), true]]);
+        p.unreviewed_count ? [["Отмена"], changeDir, allBtn, ["Копировать проверенные", () => runExport(false), true]] : [["Отмена"], changeDir, ["Копировать", () => runExport(false), true]]);
     }
   } catch (e) { alert(e.message); }
 };
@@ -1821,7 +1871,7 @@ async function runExport(includeUnreviewed) {
   try {
     const r = await api("POST", "/api/export", {include_unreviewed: !!includeUnreviewed});
     $("#dlg").close();
-    dialog(`Экспорт завершён.\nСкопировано: ${r.copied} (${fmtMB(r.bytes)})\nПропущено (уже есть): ${r.skipped}\nОшибок: ${r.errors.length}` +
+    dialog(`Экспорт завершён.\nСкопировано: ${r.copied} (${fmtMB(r.bytes)})\nПропущено (уже есть): ${r.skipped}\n${r.missing ? `Нет на диске (запись в базе устарела): ${r.missing}\n` : ""}Ошибок: ${r.errors.length}` +
       (r.errors.length ? "\n\n" + r.errors.slice(0, 8).join("\n") : "") + `\n\nПапка: ${r.out}` +
       `\n\nМеток из проверенных событий: ${r.labels}. ` + (r.training ? "Обучение личной модели запущено…" : (r.labels ? "Обучение уже идёт." : "Обучение не запускалось: нет проверенных событий.")), [["Закрыть", null, true]]);
     watchTraining();
@@ -2181,11 +2231,12 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="BestShots: интерфейс финального отбора")
     ap.add_argument("--db", default="bestshots.db")
-    ap.add_argument("--out", default=str(ROOT / "Export"), help="папка экспорта")
+    ap.add_argument("--out", default=None, help="папка экспорта (по умолчанию — выбранная в окне экспорта, иначе Export рядом с программой)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="не открывать браузер автоматически")
     args = ap.parse_args()
-    DB_PATH, OUT_DIR, PORT = str(Path(args.db).resolve()), Path(args.out).resolve(), args.port
+    DB_PATH, PORT = str(Path(args.db).resolve()), args.port
+    OUT_DIR = Path(args.out or load_settings().get("export_dir") or ROOT / "Export").resolve()
     setup_logging()
     con = db()  # базы может ещё не быть — интерфейс предложит выбрать главную папку
     con.executescript(SCHEMA)

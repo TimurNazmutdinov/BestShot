@@ -266,7 +266,6 @@ def analyze_files(con, force, limit):
 
     ensure_models()
     tools = load_faces()
-    t0 = time.time()
     progress("download", msg="Подготовка моделей (при первом запуске — загрузка, нужен интернет)")
     iqa = load_iqa() if todo or todo_iqa else None
 
@@ -303,7 +302,6 @@ def analyze_files(con, force, limit):
     clip, preprocess, head = load_clip()
     progress("analyze", 0, len(todo))
     config.THUMBS_DIR.mkdir(exist_ok=True)
-    t0 = time.time()
     failed = 0
 
     def flush(batch):
@@ -322,6 +320,19 @@ def analyze_files(con, force, limit):
             con.execute(f"INSERT OR REPLACE INTO analysis ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                         [m[c] for c in cols])
         con.commit()
+
+    prime_text_cache(clip)
+    live = {"t": time.time(), "n": 0}
+
+    def maybe_live_score(done_count):
+        """События появляются в «Отборе» не в конце порции, а по мере анализа: раз в LIVE['every'] секунд."""
+        if done_count - live["n"] < LIVE["min"] or time.time() - live["t"] < LIVE["every"]:
+            return
+        try:
+            score_all(con, freeze_decided=True)  # проверенные события не трогаем
+        except Exception as e:  # промежуточный пересчёт не должен ронять анализ
+            print(f"  промежуточный пересчёт баллов не удался: {type(e).__name__}: {e}", file=sys.stderr)
+        live.update(t=time.time(), n=done_count)
 
     batch = []
     for i, (path, sha) in enumerate(todo, 1):
@@ -342,6 +353,7 @@ def analyze_files(con, force, limit):
         if len(batch) >= config.BATCH:
             flush(batch)
             batch = []
+            maybe_live_score(i)
         if i % 3 == 0 or i == len(todo):
             progress("analyze", i, len(todo))
     flush(batch)
@@ -360,19 +372,42 @@ def robust_norm(values):
     return np.clip((v - lo) / (hi - lo), 0, 1)
 
 
-def clip_emotion_probs(emb):
-    """Доля «тёплых» фраз в CLIP zero-shot по сохранённым эмбеддингам и текущим фразам из config.
-    Текстовый кодировщик CLIP загружается только здесь."""
+_TEXT = {}  # текстовые признаки наборов фраз: считаются один раз на процесс
+LIVE = {"every": config.LIVE_SCORE_EVERY_S, "min": config.LIVE_SCORE_MIN_NEW}
+
+
+def _text_features(model, pos, neg):
     import open_clip
     import torch
-    model, _ = create_clip()
-    tok = open_clip.get_tokenizer(config.CLIP_MODEL)
-    npos = len(config.POSITIVE_PROMPTS)
+    key = tuple(pos + neg)
+    if key not in _TEXT:
+        tok = open_clip.get_tokenizer(config.CLIP_MODEL)
+        with torch.no_grad():
+            t = model.encode_text(tok(list(key)))
+            _TEXT[key] = (t / t.norm(dim=-1, keepdim=True), float(model.logit_scale.exp()))
+    return _TEXT[key]
+
+
+def prime_text_cache(model):
+    """Текстовые признаки фраз по уже загруженной модели CLIP (анализ не грузит вторую копию модели)."""
+    _text_features(model, config.POSITIVE_PROMPTS, config.NEGATIVE_PROMPTS)
+    _text_features(model, config.PEOPLE_POSITIVE_PROMPTS, config.PEOPLE_NEGATIVE_PROMPTS)
+
+
+def clip_probs(emb, pos, neg):
+    """Доля «положительных» фраз в CLIP zero-shot по сохранённым эмбеддингам (модель грузится один раз на процесс)."""
+    import torch
+    if tuple(pos + neg) not in _TEXT:
+        model, _ = create_clip()
+        _text_features(model, pos, neg)
+    t, scale = _text_features(None, pos, neg)
     with torch.no_grad():
-        t = model.encode_text(tok(config.POSITIVE_PROMPTS + config.NEGATIVE_PROMPTS))
-        t = t / t.norm(dim=-1, keepdim=True)
-        logits = model.logit_scale.exp() * torch.from_numpy(emb) @ t.T
-        return logits.softmax(dim=-1)[:, :npos].sum(dim=-1).numpy()
+        logits = scale * torch.from_numpy(emb) @ t.T
+        return logits.softmax(dim=-1)[:, :len(pos)].sum(dim=-1).numpy()
+
+
+def clip_emotion_probs(emb):
+    return clip_probs(emb, config.POSITIVE_PROMPTS, config.NEGATIVE_PROMPTS)
 
 
 def reject_reason(a):
@@ -443,10 +478,12 @@ def select_in_event(items):
     for r in mandatory:
         r["selected"] = True
     target = max(1, round(config.TARGET_SELECT_FRACTION * len(items)))
+    taken = len(mandatory)
     for r in sorted(pool, key=lambda r: -r["score"]):
-        if sum(x["selected"] for x in items) >= target:
+        if taken >= target:
             break
         r["selected"] = True
+        taken += 1
 
 
 def score_all(con, freeze_decided=False):
@@ -457,6 +494,18 @@ def score_all(con, freeze_decided=False):
     con.row_factory = None
     if not rows:
         return []
+    # точные копии (тот же sha256 в одном событии) не должны соревноваться друг с другом и раздувать группы:
+    # считаем по одному представителю, копии получают его результат
+    seen, dups = {}, []
+    uniq = []
+    for r in rows:
+        key = (r["event_id"], r["sha256"])
+        if r["sha256"] and key in seen:
+            dups.append((r, seen[key]))
+        else:
+            seen[key] = r
+            uniq.append(r)
+    rows_all, rows = rows, uniq
     for r in rows:
         r["emb"] = np.frombuffer(r["embedding"], dtype=np.float32)
         r["ts"] = datetime.fromisoformat(r["date_taken"]).timestamp()
@@ -464,24 +513,6 @@ def score_all(con, freeze_decided=False):
         r["reject"] = bool(r["reason"])
     for r, p in zip(rows, clip_emotion_probs(np.stack([r["emb"] for r in rows]))):
         r["clip_emotion"] = float(p)
-
-    # нормировка по всему архиву среди не-брака (5–95 перцентили)
-    ok = [r for r in rows if not r["reject"]] or rows
-
-    def span(key, f=lambda v: v):
-        vals = [f(r[key]) for r in ok if r.get(key) is not None]
-        return tuple(np.percentile(vals, [5, 95])) if vals else (0.0, 1.0)
-
-    lo_a, hi_a = span("aesthetic")
-    lo_i, hi_i = span("topiq_iaa")
-    lo_n, hi_n = span("topiq_nr")
-    lo_c, hi_c = span("clip_emotion")
-    lo_s, hi_s = span("sharp_center", math.log1p)
-
-    def nz(v, lo, hi):
-        if v is None:
-            return 0.5
-        return float(np.clip((v - lo) / (hi - lo), 0, 1)) if hi - lo > 1e-9 else 0.5
 
     # группы похожих: внутри события
     events = defaultdict(list)
@@ -504,6 +535,33 @@ def score_all(con, freeze_decided=False):
         for r in g:
             r["group_size"] = len(g)
             r["group_faces"] = has_faces
+
+    if config.EXCLUDE_NO_PEOPLE:  # люди есть: лица в самом кадре, либо CLIP видит людей; иначе — «брак: без людей»
+        # (лица группы не учитываем: в группу пейзажей попадает кадр с ложным «лицом» на статуе, и вся группа считалась бы с людьми)
+        people = clip_probs(np.stack([r["emb"] for r in rows]), config.PEOPLE_POSITIVE_PROMPTS, config.PEOPLE_NEGATIVE_PROMPTS)
+        for r, p in zip(rows, people):
+            r["people"] = float(p)
+            if not r["n_faces"] and p < config.PEOPLE_CLIP_MIN:
+                r["reason"] = ",".join(x for x in (r["reason"], "без людей") if x)
+                r["reject"] = True
+
+    # нормировка по всему архиву среди не-брака (5–95 перцентили)
+    ok = [r for r in rows if not r["reject"]] or rows
+
+    def span(key, f=lambda v: v):
+        vals = [f(r[key]) for r in ok if r.get(key) is not None]
+        return tuple(np.percentile(vals, [5, 95])) if vals else (0.0, 1.0)
+
+    lo_a, hi_a = span("aesthetic")
+    lo_i, hi_i = span("topiq_iaa")
+    lo_n, hi_n = span("topiq_nr")
+    lo_c, hi_c = span("clip_emotion")
+    lo_s, hi_s = span("sharp_center", math.log1p)
+
+    def nz(v, lo, hi):
+        if v is None:
+            return 0.5
+        return float(np.clip((v - lo) / (hi - lo), 0, 1)) if hi - lo > 1e-9 else 0.5
 
     base_w = {"laion": config.W_LAION, "iaa": config.W_TOPIQ_IAA, "nr": config.W_TOPIQ_NR}
     for r in rows:
@@ -533,6 +591,12 @@ def score_all(con, freeze_decided=False):
 
     for items in events.values():
         select_in_event(items)
+
+    for d, src in dups:
+        keep = {k: d[k] for k in ("path", "date_taken", "width", "height", "orientation")}
+        d.update(src)
+        d.update(keep)
+    rows = rows_all
 
     if freeze_decided:  # события с решениями пользователя не пересчитываем: оставляем прежнюю рекомендацию
         tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -589,7 +653,12 @@ def main():
     ap.add_argument("--keep-decided", action="store_true",
                     help="не менять рекомендацию в событиях, где есть решения пользователя")
     ap.add_argument("--score-only", action="store_true", help="не анализировать, только пересчитать баллы/группы")
+    ap.add_argument("--live-score-every", type=float, default=config.LIVE_SCORE_EVERY_S,
+                    help="период промежуточного пересчёта баллов во время анализа, с (0 — только в конце)")
+    ap.add_argument("--live-score-min", type=int, default=config.LIVE_SCORE_MIN_NEW,
+                    help="минимум новых фото между промежуточными пересчётами")
     args = ap.parse_args()
+    LIVE.update(every=args.live_score_every if args.live_score_every > 0 else 10 ** 9, min=args.live_score_min)
     if not os.path.exists(args.db):
         sys.exit(f"Нет базы {args.db}: сначала запустите scan.py")
     con = sqlite3.connect(args.db)
@@ -604,9 +673,12 @@ def main():
     for col in ("base_score", "personal"):
         if col not in have:
             con.execute(f"ALTER TABLE scores ADD COLUMN {col} REAL")
+    con.executescript("CREATE INDEX IF NOT EXISTS idx_scores_event ON scores(event_id);"
+                      "CREATE INDEX IF NOT EXISTS idx_scores_group ON scores(group_id);")
     if not args.score_only:
         analyze_files(con, args.force, args.limit)
-    rows = score_all(con, args.keep_decided)
+    # анализ новых фото не меняет рекомендации в проверенных событиях; полный пересчёт — только --score-only
+    rows = score_all(con, args.keep_decided or not args.score_only)
     if rows:
         report(rows)
     con.close()

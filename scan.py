@@ -169,7 +169,7 @@ def scan_file(path, kind, known=None):
 
 def is_hidden_dir(path, name):
     """Скрытые и системные папки (имя на «.» или «$», атрибуты Windows) пропускаем, как и в дереве папок."""
-    if name == "_Дубли" or name.startswith((".", "$")):  # _Дубли — карантин дубликатов
+    if name == "_Дубли" or name.startswith((".", "$")) or name.lower() == "__macosx":  # _Дубли — карантин дубликатов
         return True
     try:
         return bool(getattr(os.stat(path, follow_symlinks=False), "st_file_attributes", 0) & 0x6)
@@ -188,6 +188,8 @@ def iter_media(root, excluded=()):
                              if not is_hidden_dir(os.path.join(dirpath, d), d)
                              and not any(under(os.path.join(dirpath, d), e) for e in excluded))
         for name in sorted(filenames):
+            if name.startswith("._"):  # служебные файлы macOS («._IMG.JPG») — не изображения
+                continue
             ext = os.path.splitext(name)[1].lower()
             if ext in PHOTO_EXT:
                 yield Path(dirpath, name), "photo"

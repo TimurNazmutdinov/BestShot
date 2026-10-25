@@ -152,7 +152,7 @@ def personal_rows(db_path):
     when = (ps.get("trained_at") or ps.get("file_time") or "—").replace("T", " ")[:16]
     rows.append(["Последнее обучение", when])
     if ps.get("cv_f1") is not None:
-        rows.append(["Точность (leave-one-event-out, F1)", f"личная {ps['cv_f1']:.3f} против базовой {ps['base_f1']:.3f}"])
+        rows.append(["Точность (проверка по событиям, F1)", f"личная {ps['cv_f1']:.3f} против базовой {ps['base_f1']:.3f}"])
     rep = ps.get("report")
     if rep and "personal" in rep and "base" in rep:
         b, p = rep["base"], rep["personal"]
@@ -212,7 +212,7 @@ def info(*, root, db_path, main_root, port, out_dir, log_file, exe_name="BestSho
     ]})
     groups.append({"title": "Обучение на выборе", "rows": [
         ["scikit-learn", f"{version_of('scikit-learn')} — логистическая регрессия, PCA"],
-        ["Проверка", "leave-one-event-out"],
+        ["Проверка", "по событиям (событие не попадает в обучение и проверку одновременно)"],
     ] + personal_rows(db_path)})
     groups.append({"title": "Интерфейс и запуск", "rows": [
         ["Сервер", f"http.server (Python {platform.python_version()}), 127.0.0.1:{port}"],

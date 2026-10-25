@@ -1,4 +1,4 @@
-"""Личная модель отбора: признаки, обучение (логистическая регрессия) и оценка leave-one-event-out.
+"""Личная модель отбора: признаки, обучение (логистическая регрессия) и оценка по событиям.
 
 Используется из train.py (обучение) и analyze.py (применение при подсчёте баллов).
 """
@@ -25,7 +25,6 @@ def build_features(rows):
     tab = np.zeros((n, len(TAB_NAMES)), dtype=np.float64)
     nz = lambda v, d=0.0: d if v is None else float(v)
     for idx in groups.values():
-        base = [rows[i]["base_score"] for i in idx]
         order = sorted(idx, key=lambda i: -rows[i]["base_score"])
         best = rows[order[0]]
         for rank, i in enumerate(order):
@@ -80,11 +79,19 @@ def match_stats(rec, y):
 
 
 def loeo(rows, y, X):
-    """Leave-one-event-out: вероятности для каждого кадра от модели, не видевшей его событие."""
+    """Проверка по событиям: вероятности для каждого кадра от модели, не видевшей его событие.
+    Событий немного — по одному (leave-one-event-out); их сотни — блоками по PERSONAL_MAX_FOLDS, иначе обучение
+    длится десятки минут."""
     events = np.array([r["event_id"] for r in rows])
+    uniq = np.unique(events)
     probs = np.zeros(len(rows))
-    for ev in np.unique(events):
-        test = events == ev
+    if len(uniq) > config.PERSONAL_MAX_FOLDS:
+        fold_of = dict(zip(np.random.default_rng(0).permutation(uniq), np.arange(len(uniq)) % config.PERSONAL_MAX_FOLDS))
+        folds = np.array([fold_of[e] for e in events])
+        masks = [folds == f for f in range(config.PERSONAL_MAX_FOLDS)]
+    else:
+        masks = [events == ev for ev in uniq]
+    for test in masks:
         train = ~test
         if len(np.unique(y[train])) < 2:
             probs[test] = y[train].mean() if train.any() else 0.5

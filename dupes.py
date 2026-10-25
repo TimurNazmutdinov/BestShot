@@ -5,7 +5,6 @@
 """
 import csv
 import hashlib
-import json
 import os
 import shutil
 import sqlite3
@@ -112,7 +111,7 @@ def excluded_paths(con):
 
 def skip_dir(path, name, excluded=()):
     """Скрытые, системные, исключённые папки и карантин _Дубли в поиске не участвуют."""
-    if name == QUARANTINE or name.startswith((".", "$")):
+    if name == QUARANTINE or name.startswith((".", "$")) or name.lower() == "__macosx":
         return True
     try:
         if getattr(os.stat(path), "st_file_attributes", 0) & 0x6:

@@ -49,8 +49,8 @@ GROUP_MAX_GAP_S = 180     # максимум 3 минуты между кадр�
 TARGET_SELECT_FRACTION = 0.38   # цель: доля кадров события в рекомендации
 # разнообразие: в группе похожих рекомендуем до N кадров, если они заметно отличаются
 DIVERSITY_MAX_PER_GROUP = 3
-DIVERSITY_SIM_MAX = 0.88        # косинусная близость CLIP между рекомендованными кадрами группы ниже этого
-DIVERSITY_MIN_SCORE_RATIO = 0.85  # и балл не ниже этой доли от лучшего в группе
+DIVERSITY_SIM_MAX = 0.95        # косинусная близость CLIP между рекомендованными кадрами группы ниже этого
+DIVERSITY_MIN_SCORE_RATIO = 0.5   # и балл не ниже этой доли от лучшего в группе
 
 # --- личная модель (train.py) ---
 PERSONAL_MODEL = MODELS_DIR / "personal.pkl"
@@ -58,6 +58,7 @@ PERSONAL_PREV = MODELS_DIR / "personal_prev.pkl"
 PERSONAL_PCA = 64         # размерность PCA для эмбеддинга CLIP
 PERSONAL_C = 0.05         # обратная сила регуляризации логистической регрессии (меньше = сильнее)
 PERSONAL_K = 300          # вес личной модели в итоговом балле = n / (n + K), n — число меток
+PERSONAL_MAX_FOLDS = 10     # проверка по событиям: если событий больше, они делятся на столько блоков (иначе — по одному)
 PERSONAL_MIN_LABELS = 30  # меньше меток или меньше 3 событий — не обучаем
 
 # --- CLIP ---
@@ -82,6 +83,18 @@ POSITIVE_PROMPTS = ["a joyful candid moment", "people laughing", "a hug", "a ten
 NEGATIVE_PROMPTS = ["a boring snapshot", "people with closed eyes",
                     "a screenshot", "a photo of a document", "a receipt", "a blurry photo"]
 
+# --- кадры без людей: помечаются как брак с причиной «без людей» (не рекомендуются, но отобрать можно) ---
+EXCLUDE_NO_PEOPLE = True       # False — не помечать
+PEOPLE_CLIP_MIN = 0.35         # «люди есть», если в кадре нашлись лица или CLIP даёт долю людей не ниже этой
+PEOPLE_POSITIVE_PROMPTS = ["a photo of people", "a photo of a person", "a photo of a child", "a family photo",
+                           "a group of people", "a photo of a baby", "a portrait of a person", "a person's face",
+                           "people posing for a photo"]
+PEOPLE_NEGATIVE_PROMPTS = ["a landscape without people", "an empty room", "a photo of an object", "a photo of nature",
+                           "a photo of a building", "a photo of food", "an animal", "a photo of toys",
+                           "a photo of clothes", "a photo of a vehicle or a road", "a photo of a document or paper",
+                           "a photo of furniture", "a photo of flowers", "a photo of a pet", "a close-up of a thing",
+                           "an interior of a room"]
+
 # --- большие архивы: разбивка по частям ---
 REVIEW_PART_SIZE = 150                 # кадров на странице («части») события во вкладке «Отбор» по умолчанию
 REVIEW_PART_CHOICES = [50, 100, 150, 300, 500, 0]   # варианты размера части; 0 — всё событие сразу (тяжело для больших)
@@ -99,6 +112,10 @@ DUP_PIXEL_CORR_MIN = 0.998  # мин. корреляция уменьшенны�
 DUP_PIXEL_MAD_MAX = 0.05  # макс. средняя абс. разность нормированных 16×16 копий (копии ≤ 0.025, серии ≥ 0.09)
 DUP_DATE_TOLERANCE_S = 2  # допуск по дате съёмки, если дата есть у обоих файлов
 DUP_UNCERTAIN_MARGIN = 1  # «автоматика не уверена»: до порога хэшей осталось не больше этого числа бит / CLIP ближе чем на 0.01
+
+# --- живое обновление «Отбора» во время анализа ---
+LIVE_SCORE_EVERY_S = 300       # раз в столько секунд баллы и события пересчитываются по уже обработанным кадрам
+LIVE_SCORE_MIN_NEW = 40        # ...если с прошлого пересчёта обработано не меньше стольких новых фото
 
 # --- о программе ---
 APP_VERSION = "1.0"
